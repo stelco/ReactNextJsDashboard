@@ -45,7 +45,6 @@ export type State = {
       customerId?: string[];
       amount?: string[];
       status?: string[];
-      date?: string[];
     };
     message?: string | null;
   };

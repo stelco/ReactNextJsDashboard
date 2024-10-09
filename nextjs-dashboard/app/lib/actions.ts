@@ -8,9 +8,15 @@ import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { signIn } from '@/auth';
 import { AuthError } from 'next-auth';
+import path from 'path';
  
-const FormSchema = z.object({
+const CreateCustomer = z.object({
   id: z.string(),
+  name: z.string().min(1, { message: 'Please enter a name.' }),
+  email: z.string().email({ message: 'Please enter a valid email address.' }),
+  file: z.string().min(1, { message: 'Image is required.' }),
+});
+const CreateInvoice = z.object({
   customerId: z.string({
     invalid_type_error: 'Please select a customer.',
   }),
@@ -19,22 +25,87 @@ const FormSchema = z.object({
     .gt(0, { message: 'Please enter an amount greater than $0.' }),
   status: z.enum(['pending', 'paid'], {
     invalid_type_error: 'Please select an invoice status.',
-  }),
-  date: z.string(),
+  })
 });
- 
-const CreateInvoice = FormSchema.omit({ id: true, date: true });
-// Use Zod to update the expected types
-const UpdateInvoice = FormSchema.omit({ id: true, date: true });
+
+const UpdateInvoice = z.object({
+  customerId: z.string({
+    invalid_type_error: 'Please select a customer.',
+  }),
+  amount: z.coerce
+    .number()
+    .gt(0, { message: 'Please enter an amount greater than $0.' }),
+  status: z.enum(['pending', 'paid'], {
+    invalid_type_error: 'Please select an invoice status.',
+  })
+});
 
 export type State = {
     errors?: {
       customerId?: string[];
       amount?: string[];
       status?: string[];
+      date?: string[];
     };
     message?: string | null;
   };
+
+  export type CustomerState = {
+    errors?: {
+      id?: string[];
+      name?: string[];
+      email?: string[];
+      file?: string[];
+
+    };
+    message?: string;
+  };
+
+  export async function createCustomer(prevState: CustomerState, formData: FormData) {
+
+    const uploadsDir = '/customers'; // Define the uploads directory path
+    const file = formData.get('file') as File;
+
+    if (!file) {
+      return {
+        errors: { file: ['No file uploaded'] },
+        message: 'Missing Fields. Failed to Create Customer.',
+      };
+    }
+  
+    let filePath = path.join(uploadsDir, file.name); // Concatenate the uploadsDir path with the file name
+    filePath = filePath.replace(/\\/g, '/'); // Replace backslashes with forward slashes
+
+    const validatedFields = CreateCustomer.safeParse({
+      id: crypto.randomUUID(),
+      name: formData.get('name'),
+      email: formData.get('email'),
+      file: filePath, // Use the full path and file name
+    });
+   
+    if (!validatedFields.success) {
+      return {
+        errors: validatedFields.error.flatten().fieldErrors,
+        message: 'Missing Fields. Failed to Create Customer.',
+      };
+    }
+
+    const { id, name, email, file: validatedFile } = validatedFields.data;
+
+    console.log("validatedFields----",validatedFields.data);
+   
+    try {
+      await sql`
+        INSERT INTO customers (id, name, email, image_url)
+        VALUES (${id}, ${name}, ${email}, ${validatedFile})
+      `;
+    } catch (error) {
+      return { message: 'Database Error: Failed to Create Customer.' };
+    }
+   
+    revalidatePath('/dashboard/customers');
+    redirect('/dashboard/customers');
+  }
 
   export async function createInvoice(prevState: State, formData: FormData) {
     // Validate form using Zod
